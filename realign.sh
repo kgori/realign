@@ -1,23 +1,29 @@
 #!/bin/bash
 Help() {
-  echo "Usage: $0 [options] <input.bam> <reference.fa>"
+  echo -e "\033[1;4;37mRealign Reads Script\033[0m"
+  echo ""
+  echo -e " Usage: \033[1m$(basename $0)\033[0m [\033[36moptions\033[0m] \033[32m<input.bam> <reference.fa>\033[0m"
   echo
-  echo "Realign reads in the input BAM file to the reference genome using BWA-MEM2 or BWA."
+  echo " Realign reads in the input BAM file to the reference genome using BWA-MEM2 or BWA."
   echo
-  echo "Options:"
-  echo "  -o, --output <file>   Output CRAM file name. If not provided, defaults to <input>_realigned.cram."
-  echo "  -t, --threads <num>   Number of threads to use (default: 16)."
-  echo "  --dry-run             Print the commands without executing them."
-  echo "  -h, --help            Display this help message."
+  echo -e " \033[36mOptions\033[0m:"
+  echo "  -o, --output        <file>               Output CRAM file name. If not provided, defaults to <input>_realigned.cram."
+  echo "  -O, --output-format <BAM|CRAM|CRAM3.1>   Output format (choose BAM or CRAM; default: CRAM, aka CRAMv3.0)."
+  echo "  -t, --threads       <num>                Number of threads to use (default: 16)."
+  echo "      --dry-run                            Print the commands without executing them."
+  echo "      --write-index                        Write an index for the output file."
+  echo "  -h, --help                               Display this help message."
 }
 
 # Defaults
+OUTPUT_FORMAT="CRAM"
 THREADS=16
 DRY_RUN=0
+WRITE_INDEX=0
 OUT=""
 
 # Getopt
-ARGS=$(getopt -o o:t:h --long output:,threads:,dry-run,help -n '$0' -- "$@")
+ARGS=$(getopt -o o:O:t:h --long output:,output-format:,threads:,dry-run,write-index,help -n '$0' -- "$@")
 if [ $? -ne 0 ]; then
     Help
     exit 1
@@ -30,12 +36,20 @@ while true; do
       OUT="$2"
       shift 2
       ;;
+    -O|--output-format)
+      OUTPUT_FORMAT="$2"
+      shift 2
+      ;;
     -t|--threads)
       THREADS="$2"
       shift 2
       ;;
     --dry-run)
       DRY_RUN=1
+      shift
+      ;;
+    --write-index)
+      WRITE_INDEX=1
       shift
       ;;
     -h|--help)
@@ -59,17 +73,18 @@ BAM=$1
 REF=$2
 
 if [ -z "$BAM" ] || [ -z "$REF" ]; then
+  echo -e "\033[1;31mError: Missing required arguments.\033[0m" >&2
   Help
   exit 1
 fi
 
-if [ ! -f "$BAM" ]; then
-  echo "Error: Input BAM file '$BAM' not found!" >&2
+if [ ! -e "$BAM" ]; then
+  echo -e "\033[1;31mError: Input BAM file '$BAM' not found!\033[0m" >&2
   exit 1
 fi
 
-if [ ! -f "$REF" ]; then
-  echo "Error: Reference genome file '$REF' not found!" >&2
+if [ ! -e "$REF" ]; then
+  echo -e "\033[1;31mError: Reference genome file '$REF' not found!\033[0m" >&2
   exit 1
 fi
 
@@ -78,11 +93,12 @@ HAVE_BWA2=$(command -v bwa-mem2)
 HAVE_BWA=$(command -v bwa)
 
 if [ -z "$HAVE_BWA2" ] && [ -z "$HAVE_BWA" ]; then
-  echo "Error: Neither bwa-mem2 nor bwa is installed or in PATH" >&2
+  echo -e "\033[1;31mError: Neither bwa-mem2 nor bwa is installed or in PATH\033[0m" >&2
   exit 1
 fi
 
 # Check which index files are available
+echo "Checking for "${REF}.bwt.2bit.64" index files" >&2
 HAVE_BWA2_INDEX=$([ -f "${REF}.bwt.2bit.64" ] && echo 1 || echo 0)
 HAVE_BWA_INDEX=$([ -f "${REF}.bwt" ] && echo 1 || echo 0)
 
@@ -92,7 +108,7 @@ if [ -n "$HAVE_BWA2" ] && [ "$HAVE_BWA2_INDEX" -eq 1 ]; then
 elif [ -n "$HAVE_BWA" ] && [ "$HAVE_BWA_INDEX" -eq 1 ]; then
   BWA="bwa"
 else
-  echo "Error: Index files are missing for available aligners." >&2
+  echo -e "\033[1;31mError: Index files are missing for available aligners.\033[0m" >&2
   if [ -n "$HAVE_BWA2" ]; then
     echo "Please run bwa-mem2 index on the reference genome." >&2
   else
@@ -103,17 +119,33 @@ fi
 
 re='^[0-9]+$'
 if ! [[ $THREADS =~ $re ]] ; then
-  echo "Error: Number of threads is not a number" >&2
+  echo -e "\033[1;31mError: Number of threads is not a number\033[0m" >&2
   exit 1
 fi
 
 if [ $THREADS -lt 1 ]; then
-  echo "Error: Number of threads must be at least 1" >&2
+  echo -e "\033[1;31mError: Number of threads must be at least 1\033[0m" >&2
   exit 1
 fi
 
 if [ -z "$OUT" ]; then
-  OUT=${BAM%.*am}_realigned.cram
+  if [ "$OUTPUT_FORMAT" == "BAM" ]; then
+    OUT="${BAM%.*am}_realigned.bam"
+  else
+    OUT="${BAM%.*am}_realigned.cram"
+  fi
+fi
+
+if [ "$OUTPUT_FORMAT" != "CRAM" ] && [ "$OUTPUT_FORMAT" != "BAM" ] && [ "$OUTPUT_FORMAT" != "CRAM3.1" ]; then
+  echo -e "\033[1;31mError: Unsupported output format '$OUTPUT_FORMAT'. Use BAM, CRAM or CRAM3.1.\033[0m" >&2
+  exit 1
+fi
+
+FMT="-O CRAM,version=3.0 --reference ${REF}"
+if [ "$OUTPUT_FORMAT" == "BAM" ]; then
+  FMT="-O BAM"
+elif [ "$OUTPUT_FORMAT" == "CRAM3.1" ]; then
+  FMT="-O CRAM,version=3.1 --reference ${REF}"
 fi
 
 ALIGN_THREADS=$THREADS
@@ -127,16 +159,20 @@ echo -e "Using aligner:    \033[1;34m$BWA\033[0m" >&2
 echo -e "Input BAM:        \033[1;34m$BAM\033[0m" >&2
 echo -e "Reference genome: \033[1;34m$REF\033[0m" >&2
 echo -e "Output file:      \033[1;34m$OUT\033[0m" >&2
+echo -e "Output format:    \033[1;34m$OUTPUT_FORMAT\033[0m" >&2
 echo -e "Total threads:    \033[1;34m$THREADS \033[34m(Align: $ALIGN_THREADS, Sort: $SORT_THREADS)\033[0m" >&2
 
 CMD="samtools collate -Oun128 ${BAM} \
     | samtools fastq -OT RG,BC - \
-    | ${BWA} mem -p -Y -K 100000000 -t ${ALIGN_THREADS} -CH <(samtools view -H ${BAM} \
-    | grep ^@RG) ${REF} - \
+    | ${BWA} mem -p -Y -K 100000000 -t ${ALIGN_THREADS} -CH <(samtools view -H ${BAM} | grep ^@RG) ${REF} - \
     | samtools sort -n -@ ${SORT_THREADS} -o - \
     | samtools fixmate -m - - \
     | samtools sort -@ ${SORT_THREADS} -o - \
-    | samtools markdup -@ ${SORT_THREADS} -O CRAM --reference ${REF} - ${OUT}"
+    | samtools markdup -@ ${SORT_THREADS} ${FMT} - ${OUT}"
+
+if [ "$WRITE_INDEX" -eq 1 ]; then
+  CMD="$CMD && samtools index ${OUT}"
+fi
 
 if [ $DRY_RUN -eq 1 ]; then
   echo ""
