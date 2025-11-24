@@ -1,4 +1,6 @@
 #!/bin/bash
+set -o pipefail
+
 Help() {
   echo -e "\033[1;4;37mRealign Reads Script\033[0m"
   echo ""
@@ -69,8 +71,8 @@ while true; do
 done
 
 # Positional arguments
-BAM=$1
-REF=$2
+BAM="${1:-}"
+REF="${2:-}"
 
 if [ -z "$BAM" ] || [ -z "$REF" ]; then
   echo -e "\033[1;31mError: Missing required arguments.\033[0m" >&2
@@ -154,6 +156,15 @@ if [ $SORT_THREADS -lt 1 ]; then
   SORT_THREADS=1
 fi
 
+# All options are valid, so make a temporary directory
+TMPDIR="$(mktemp -d -t realign_tmp_XXXXXX)"
+
+cleanup() {
+  rm -rf "$TMPDIR"
+}
+
+trap 'exit_code=$?; cleanup; exit $exit_code' EXIT
+
 echo -e "\033[4;32m$(basename $0)\033[0m" >&2
 echo -e "Using aligner:    \033[1;34m$BWA\033[0m" >&2
 echo -e "Input BAM:        \033[1;34m$BAM\033[0m" >&2
@@ -162,13 +173,13 @@ echo -e "Output file:      \033[1;34m$OUT\033[0m" >&2
 echo -e "Output format:    \033[1;34m$OUTPUT_FORMAT\033[0m" >&2
 echo -e "Total threads:    \033[1;34m$THREADS \033[34m(Align: $ALIGN_THREADS, Sort: $SORT_THREADS)\033[0m" >&2
 
-CMD="samtools collate -Oun128 ${BAM} \
+CMD="samtools collate -Oun128 -T ${TMPDIR}/collate ${BAM} \
     | samtools fastq -OT RG,BC - \
     | ${BWA} mem -p -Y -K 100000000 -t ${ALIGN_THREADS} -CH <(samtools view -H ${BAM} | grep ^@RG) ${REF} - \
-    | samtools sort -n -@ ${SORT_THREADS} -o - \
+    | samtools sort -n -@ ${SORT_THREADS} -T ${TMPDIR}/namesort -o - \
     | samtools fixmate -m - - \
-    | samtools sort -@ ${SORT_THREADS} -o - \
-    | samtools markdup -@ ${SORT_THREADS} ${FMT} - ${OUT}"
+    | samtools sort -@ ${SORT_THREADS} -T ${TMPDIR}/possort -o - \
+    | samtools markdup -@ ${SORT_THREADS} -T ${TMPDIR}/markdup ${FMT} - ${OUT}"
 
 if [ "$WRITE_INDEX" -eq 1 ]; then
   CMD="$CMD && samtools index ${OUT}"
@@ -178,6 +189,13 @@ if [ $DRY_RUN -eq 1 ]; then
   echo ""
   echo -e "\033[1;31m**Dry run mode. The following command would be executed:**\033[0m" >&2
   echo "$CMD" >&2
+  exit 0
 else
+  echo -e "\033[1;33mExecuting realignment command\n${CMD}\033[0m" >&2
   eval "$CMD"
+  [ -s "$OUT" ] || { echo -e "\033[1;31mError: Output file '$OUT' is empty!\033[0m" >&2; exit 1; }
+  samtools quickcheck "$OUT" || { echo -e "\033[1;31mError: Output file '$OUT' is corrupted or incomplete!\033[0m" >&2; exit 1; }
+  echo -e "\033[1;32mRealignment completed successfully. Output written to '$OUT'.\033[0m" >&2
+  exit 0
 fi
+
