@@ -190,14 +190,7 @@ if [ $DRY_RUN -eq 1 ]; then
 else
   echo -e "\033[1;33mExecuting realignment command\n${CMD}\033[0m" >&2
 
-  set -euo pipefail
-  samtools collate -Oun128 -T "${TMPDIR}/collate" "${BAM}" \
-    | samtools fastq -OT RG,BC - \
-    | "${BWA}" mem -p -Y -K 100000000 -t ${ALIGN_THREADS} -CH <(samtools view -H "${BAM}" | grep ^@RG) "${REF}" - \
-    | samtools sort -n -@ "${SORT_THREADS}" -T "${TMPDIR}/namesort" -o - \
-    | samtools fixmate -m - - \
-    | samtools sort -@ "${SORT_THREADS}" -T "${TMPDIR}/possort" -o - \
-    | samtools markdup -@ "${SORT_THREADS}" -T "${TMPDIR}/markdup" "${FMT}" - "${OUT}"
+  eval "$CMD"
 
   if [ $? -ne 0 ]; then
     echo -e "\033[1;31mError: Realignment command failed\033[0m" >&2
@@ -244,6 +237,6 @@ else
   }
 
   # All looks good
-  echo -e "\033[1;32mRealignment completed successfully. Output written to '$OUT'.\033[0m" >&2
+  echo -e "\033[1;32mRealignment completed successfully. ${OUT_READS} were realigned. Output written to '$OUT'.\033[0m" >&2
   exit 0
 fi
