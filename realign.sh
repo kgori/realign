@@ -99,6 +99,15 @@ if command -v realpath >/dev/null 2>&1; then
     fi
 fi
 
+# File type validation warnings, in case files are provided in the wrong order
+if [[ ! "$BAM" =~ \.(bam|cram|sam)$ ]]; then
+  echo -e "\033[1;33mWarning: Input file '$BAM' does not have a .bam or .cram extension. Please ensure this is a valid BAM/CRAM file.\033[0m" >&2
+fi
+
+if [[ ! "$REF" =~ \.(fa|fasta|fna)(\.gz)?$ ]]; then
+  echo -e "\033[1;33mWarning: Reference file '$REF' does not have a typical FASTA extension (.fa, .fasta, .fna, etc.). Please ensure this is a valid FASTA file.\033[0m" >&2
+fi
+
 # Check which programs are available, bwa-mem2 or bwa?
 HAVE_BWA2=$(command -v bwa-mem2)
 HAVE_BWA=$(command -v bwa)
