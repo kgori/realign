@@ -188,6 +188,12 @@ fi
 # Check which programs are available, bwa-mem2 or bwa?
 HAVE_BWA2=$(command -v bwa-mem2)
 HAVE_BWA=$(command -v bwa)
+HAVE_SAMTOOLS=$(command -v samtools)
+
+if [ -z "$HAVE_SAMTOOLS" ]; then
+  echo -e "\033[1;31mError: samtools is not installed or in PATH\033[0m" >&2
+  exit 1
+fi
 
 if [ -z "$HAVE_BWA2" ] && [ -z "$HAVE_BWA" ]; then
   echo -e "\033[1;31mError: Neither bwa-mem2 nor bwa is installed or in PATH\033[0m" >&2
